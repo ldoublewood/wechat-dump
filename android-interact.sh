@@ -1,7 +1,24 @@
 #!/bin/bash
+set -x
 # File: android-interact.sh
 # Date: Wed Nov 29 02:19:00 2017 -0800
 # Author: Yuxin Wu
+
+function ensure_user {
+    if [ $USERHASH ];then
+        echo  "USERHASH var found"
+    else
+        echo "USERHASH var not found"
+        exit 1
+    fi
+}
+
+function downfile {
+    path=$1
+    filename=$2
+    #    adb shell "su -c 'cd $MM_DIR/MicroMsg/$dbuser && busybox tar czf - EnMicroMsg.db|base64'"|base64 -di|tar xzf -
+    adb shell "su -c 'cd $path && busybox tar czf - $filename|base64'"|base64 -di|tar xzf -
+}
 
 PROG_NAME=`python -c "import os, sys; print(os.path.realpath(sys.argv[1]))" "$0"`
 PROG_DIR=`dirname "$PROG_NAME"`
@@ -13,11 +30,12 @@ source compatibility.sh
 RES_DIR="/mnt/sdcard/tencent/MicroMsg"
 MM_DIR="/data/data/com.tencent.mm"
 
-echo "Starting rooted adb server..."
-adb root
+#echo "Starting rooted adb server..."
+#adb root
 
 if [[ $1 == "uin" ]]; then
-	adb pull $MM_DIR/shared_prefs/system_config_prefs.xml 2>/dev/null
+    #	adb pull $MM_DIR/shared_prefs/system_config_prefs.xml 2>/dev/null
+        downfile $MM_DIR/shared_prefs system_config_prefs.xml
 	uin=$($GREP 'default_uin' system_config_prefs.xml | $GREP -o 'value=\"\-?[0-9]*' | cut -c 8-)
 	[[ -n $uin ]] || {
 		>&2 echo "Failed to get wechat uin. You can try other methods, or report a bug."
@@ -43,11 +61,13 @@ elif [[ $1 == "db" || $1 == "res" ]]; then
 		| awk '{if (length() == 32) print}')
 	numUser=$(echo "$userList" | wc -l)
 	# choose the first user.
-	chooseUser=$(echo "$userList" | head -n1)
-	[[ -n $chooseUser ]] || {
-		>&2 echo "Could not find user. Please check whether your resource dir is $RES_DIR"
-		exit 1
-	}
+	#chooseUser=$(echo "$userList" | tail -n1)
+        ensure_user
+        chooseUser=$USERHASH
+	# [[ -n $chooseUser ]] || {
+	# 	>&2 echo "Could not find user. Please check whether your resource dir is $RES_DIR"
+	# 	exit 1
+	# }
 	echo "Found $numUser user(s). User chosen: $chooseUser"
 
 	if [[ $1 == "res" ]]; then
@@ -71,19 +91,23 @@ elif [[ $1 == "db" || $1 == "res" ]]; then
 		echo "Resource pulled at ./resource"
 		echo "Total size: $(du -sh resource | cut -f1)"
 	else
-		echo "Pulling database and avatar index file..."
-		adb pull $MM_DIR/MicroMsg/$chooseUser/EnMicroMsg.db
-		[[ -f EnMicroMsg.db ]] && \
-			echo "Database successfully downloaded to EnMicroMsg.db" || {
-			>&2 echo "Failed to pull database by adb"
-			exit 1
-		}
-		adb pull $MM_DIR/MicroMsg/$chooseUser/sfs/avatar.index
-		[[ -f avatar.index ]] && \
-			echo "Avatar index successfully downloaded to avatar.index" || {
-				>&2 echo "Failed to pull avatar index by adb, are you using latest version of wechat?"
-				exit 1
-			}
+	        echo "Pulling database file..."
+                dbuser="9525e561d8506be8822e2f52fed283b3"
+		#adb pull $MM_DIR/MicroMsg/$chooseUser/EnMicroMsg.db
+                #adb shell "su -c 'cat /system/build.prop |grep "product"'"
+		# [[ -f EnMicroMsg.db ]] && \
+		# 	echo "Database successfully downloaded to EnMicroMsg.db" || {
+		# 	>&2 echo "Failed to pull database by adb"
+		# 	exit 1
+		# }
+                #adb shell "su -c 'cd $MM_DIR/MicroMsg/$dbuser && busybox tar czf - EnMicroMsg.db|base64'"|base64 -di|tar xzf -
+                adb shell "su -c 'cd $MM_DIR/MicroMsg/$dbuser && busybox tar czf - EnMicroMsg.db|base64'"|base64 -di|tar xzf -
+		# adb pull $MM_DIR/MicroMsg/$chooseUser/sfs/avatar.index
+		# [[ -f avatar.index ]] && \
+		# 	echo "Avatar index successfully downloaded to avatar.index" || {
+		# 		>&2 echo "Failed to pull avatar index by adb, are you using latest version of wechat?"
+		# 		exit 1
+		# 	}
 	fi
 elif [[ $1 == "db-decrypt" ]]; then
 	set -e
@@ -91,8 +115,8 @@ elif [[ $1 == "db-decrypt" ]]; then
 	$0 uin | tail -n1 | $GREP -o '\-?[0-9]*' | tee /tmp/uin
 	echo "Getting imei..."
 	$0 imei | tail -n1 | $GREP -o '[0-9]*' | tee /tmp/imei
-	echo "Getting db..."
-	$0 db
+#	echo "Getting db..."
+#	$0 db
 	echo "Decrypting db..."
 	imei=$(cat /tmp/imei)
 	uin=$(cat /tmp/uin)
