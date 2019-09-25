@@ -13,11 +13,20 @@ function ensure_user {
     fi
 }
 
-function downfile {
+function sudo {
+   adb shell "su -c '$*'"
+}
+
+function adbpull {
     path=$1
     filename=$2
-    #    adb shell "su -c 'cd $MM_DIR/MicroMsg/$dbuser && busybox tar czf - EnMicroMsg.db|base64'"|base64 -di|tar xzf -
-    adb shell "su -c 'cd $path && busybox tar czf - $filename|base64'"|base64 -di|tar xzf -
+    adb shell "su -c 'cd $path && busybox tar czf - $filename 2>/dev/null|busybox base64'"|base64 -di|tar xzf -
+
+    [[ -e $d ]] || {
+        >&2 echo "Failed to download file/directory: $path/$filename"
+        exit 1
+    }
+
 }
 
 PROG_NAME=`python -c "import os, sys; print(os.path.realpath(sys.argv[1]))" "$0"`
@@ -35,7 +44,7 @@ MM_DIR="/data/data/com.tencent.mm"
 
 if [[ $1 == "uin" ]]; then
     #	adb pull $MM_DIR/shared_prefs/system_config_prefs.xml 2>/dev/null
-        downfile $MM_DIR/shared_prefs system_config_prefs.xml
+        adbpull $MM_DIR/shared_prefs system_config_prefs.xml
 	uin=$($GREP 'default_uin' system_config_prefs.xml | $GREP -o 'value=\"\-?[0-9]*' | cut -c 8-)
 	[[ -n $uin ]] || {
 		>&2 echo "Failed to get wechat uin. You can try other methods, or report a bug."
@@ -53,20 +62,24 @@ elif [[ $1 == "imei" ]]; then
 		exit 1
 	}
 	echo "Got imei: $imei"
-elif [[ $1 == "db" || $1 == "res" ]]; then
+elif [[ $1 == "db" || $1 == "res" || $1 == "avt" ]]; then
 	echo "Looking for user dir name..."
 	sleep 1  	# sometimes adb complains: device not found
+        if [ $1 == "res" ]; then
+            userdir=$RES_DIR
+        else
+            userdir="$MM_DIR/MicroMsg"
+        fi
 	# look for dirname which looks like md5 (32 alpha-numeric chars)
-	userList=$(adb ls $RES_DIR | cut -f 4 -d ' ' | sed 's/[^0-9a-z]//g' \
+	userList=$(sudo ls $userdir | cut -f 4 -d ' ' | sed 's/[^0-9a-z]//g' \
 		| awk '{if (length() == 32) print}')
 	numUser=$(echo "$userList" | wc -l)
-	# choose the first user.
-	#chooseUser=$(echo "$userList" | tail -n1)
         ensure_user
         chooseUser=$USERHASH
-	# [[ -n $chooseUser ]] || {
-	# 	>&2 echo "Could not find user. Please check whether your resource dir is $RES_DIR"
-	# 	exit 1
+        parentdir="$userdir/$chooseUser"
+	# [[ -n $parentdir ]] || {
+	# 	>&2 echo "Could not find user. Please check whether your target dir is $parentdir"
+	#  	exit 1
 	# }
 	echo "Found $numUser user(s). User chosen: $chooseUser"
 
@@ -74,40 +87,27 @@ elif [[ $1 == "db" || $1 == "res" ]]; then
 		mkdir -p resource; cd resource
 		echo "Pulling resources... "
 		for d in avatar image2 voice2 emoji video sfs; do
-			adb shell "cd $RES_DIR/$chooseUser &&
+			adb shell "cd $parentdir &&
 								 busybox tar czf - $d 2>/dev/null | busybox base64" |
 					base64 -di | tar xzf -
 
-			# Old Slow Way:
-			# mkdir -p $d; cd $d
-			# adb pull "$RES_DIR/$chooseUser/$d"
-			# cd ..
 			[[ -d $d ]] || {
-				>&2 echo "Failed to download resource directory: $RES_DIR/$chooseUser/$d"
+				>&2 echo "Failed to download resource directory: $parentdir/$d"
 				exit 1
 			}
 		done
 		cd ..
 		echo "Resource pulled at ./resource"
 		echo "Total size: $(du -sh resource | cut -f1)"
-	else
+	elif [[ $1 == "db" ]]; then
 	        echo "Pulling database file..."
-                dbuser="9525e561d8506be8822e2f52fed283b3"
-		#adb pull $MM_DIR/MicroMsg/$chooseUser/EnMicroMsg.db
-                #adb shell "su -c 'cat /system/build.prop |grep "product"'"
-		# [[ -f EnMicroMsg.db ]] && \
-		# 	echo "Database successfully downloaded to EnMicroMsg.db" || {
-		# 	>&2 echo "Failed to pull database by adb"
-		# 	exit 1
-		# }
-                #adb shell "su -c 'cd $MM_DIR/MicroMsg/$dbuser && busybox tar czf - EnMicroMsg.db|base64'"|base64 -di|tar xzf -
-                adb shell "su -c 'cd $MM_DIR/MicroMsg/$dbuser && busybox tar czf - EnMicroMsg.db|base64'"|base64 -di|tar xzf -
-		# adb pull $MM_DIR/MicroMsg/$chooseUser/sfs/avatar.index
-		# [[ -f avatar.index ]] && \
-		# 	echo "Avatar index successfully downloaded to avatar.index" || {
-		# 		>&2 echo "Failed to pull avatar index by adb, are you using latest version of wechat?"
-		# 		exit 1
-		# 	}
+                adbpull $parentdir  EnMicroMsg.db
+        else
+	        echo "Pulling avatar file..."
+		mkdir -p avatar
+                adbpull $parentdir avatar
+		echo "Avatar pulled at ./avatar"
+		echo "Total size: $(du -sh avatar | cut -f1)"
 	fi
 elif [[ $1 == "db-decrypt" ]]; then
 	set -e
